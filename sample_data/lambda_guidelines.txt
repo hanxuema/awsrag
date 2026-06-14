@@ -1,0 +1,21 @@
+AWS Lambda Best Practices and Design Guidelines
+
+AWS Lambda allows you to run code without provisioning or managing servers. To get the most performance and lowest cost out of Lambda, adhere to the following best practices:
+
+1. Optimize Cold Starts and Warm Starts:
+- Store static assets and establish connections outside of the Lambda handler function. The execution context is reused for subsequent invocations (warm starts).
+- Initialize SDK clients (like `boto3.client('bedrock-runtime')`) and load configuration files globally.
+- Keep the deployment package size small. Only include dependencies that are strictly necessary. A larger deployment zip file takes longer to download and unpack during a cold start.
+
+2. Memory and CPU Tuning:
+- CPU power in AWS Lambda scales proportionally with the allocated memory size. If your function is CPU-bound (such as computing vector distances or parsing PDFs), increasing the memory allocation will improve execution speed, which can often decrease the overall cost.
+- Test your functions with multiple memory configurations (from 128 MB to 10 GB) to find the sweet spot where performance and cost are balanced.
+
+3. Minimize Package Size for AWS Lambda:
+- Lambda has a 250 MB limit for unzipped deployment packages.
+- For Python, use pure-Python dependencies where possible. Avoid pre-compiled C extensions unless they are built for the Amazon Linux target architecture.
+- For libraries like PyPDF, choose lightweight packages.
+
+4. Handle Lambda Payload Limits:
+- Lambda functions invoked synchronously via API Gateway have a hard payload limit of 6 MB for both request and response.
+- If you need to upload large files (like PDF documents) from the browser, generate an S3 Presigned URL from Lambda and upload the file directly to S3. This bypasses the API Gateway and Lambda payload limits completely.

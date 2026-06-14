@@ -1,0 +1,24 @@
+Amazon Bedrock Frequently Asked Questions (FAQ)
+
+Q: What is Amazon Bedrock?
+A: Amazon Bedrock is a fully managed service that offers a choice of high-performing foundation models (FMs) from leading AI companies like Anthropic, AI21 Labs, Cohere, Meta, Stability AI, and Amazon, along with a broad set of capabilities to build generative AI applications with security, privacy, and responsible AI.
+
+Q: Is Amazon Bedrock serverless?
+A: Yes, Amazon Bedrock is completely serverless. You do not need to manage any infrastructure. You pay only for what you use based on the number of input and output tokens processed by the models, or you can purchase provisioned throughput for guaranteed performance.
+
+Q: Which models are available on Amazon Bedrock?
+A: Bedrock provides access to industry-leading foundation models:
+- Anthropic Claude: Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku. Ideal for reasoning, coding, and text generation.
+- Amazon Titan: Titan Text, Titan Image Generator, and Titan Text Embeddings (V1 and V2).
+- Meta Llama: Llama 3 (8B and 70B), Llama 2. Perfect for general dialogue and fine-tuning.
+- Cohere Command: Command R and Command R+, specialized for RAG and agentic workflows.
+- Stability AI Stable Diffusion: Excellent for image generation from text prompts.
+
+Q: How does security and privacy work in Amazon Bedrock?
+A: Security and privacy are core tenets of Amazon Bedrock. 
+1. Your data is encrypted in transit and at rest.
+2. Your data, prompts, and completions are NOT used to train the base foundation models, and are never shared with third-party model providers.
+3. All data remains within your virtual private cloud (VPC) and your AWS account, complying with standard AWS security guardrails.
+
+Q: What is Bedrock's embedding dimension capability?
+A: The Amazon Titan Text Embeddings V2 model (`amazon.titan-embed-text-v2:0`) supports flexible output dimensions, including 256, 512, and 1024 dimensions. This allows developers to balance accuracy, latency, and vector search performance/cost. The default is 1024 dimensions.

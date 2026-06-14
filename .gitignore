@@ -1,0 +1,22 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# Build and Packaging
+terraform/build/
+*.zip
+__pycache__/
+*.pyc
+
+# Frontend generated files
+frontend/config.js
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local scratch files
+output.txt
+response.json

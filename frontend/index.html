@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWS Serverless RAG System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">⚡</span>
+                    <h1>AWS RAG</h1>
+                </div>
+                <p class="subtitle">Serverless Prototype</p>
+            </div>
+
+            <!-- Configuration Settings -->
+            <section class="section settings-section">
+                <h3>System Parameters</h3>
+                <div class="form-group">
+                    <label for="model-select">LLM Model</label>
+                    <input type="text" id="model-select" value="Claude 3 Haiku (Serverless)" readonly>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="top-k">Retrieve Chunks (Top-K)</label>
+                        <input type="number" id="top-k" value="3" min="1" max="10">
+                    </div>
+                    <div class="form-group">
+                        <label for="temperature">Temperature</label>
+                        <input type="number" id="temperature" value="0.2" min="0" max="1" step="0.1">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Document Upload -->
+            <section class="section upload-section">
+                <h3>Upload Knowledge Base</h3>
+                <div id="drop-zone" class="drop-zone">
+                    <div class="upload-icon">📤</div>
+                    <p class="upload-text">Drag & drop files here or click to browse</p>
+                    <p class="upload-limit">Supports TXT, MD, PDF</p>
+                    <input type="file" id="file-input" accept=".txt,.md,.pdf" style="display: none;">
+                </div>
+                <div id="upload-status" class="upload-status" style="display: none;">
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill"></div>
+                    </div>
+                    <p id="status-message">Uploading...</p>
+                </div>
+            </section>
+
+            <!-- Ingested Documents List -->
+            <section class="section documents-section">
+                <div class="section-title-row">
+                    <h3>Indexed Documents</h3>
+                    <button id="refresh-docs-btn" title="Refresh files" class="icon-btn">🔄</button>
+                </div>
+                <div id="documents-list" class="documents-list">
+                    <p class="empty-list-text">No documents indexed yet.</p>
+                </div>
+            </section>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="chat-area">
+            <header class="chat-header">
+                <div class="header-info">
+                    <h2>RAG Assistant</h2>
+                    <span class="status-indicator online"></span>
+                    <span class="status-text">Connected to Bedrock</span>
+                </div>
+                <div class="header-actions">
+                    <button id="clear-chat-btn" class="secondary-btn">Clear Conversation</button>
+                </div>
+            </header>
+
+            <!-- Messages Board -->
+            <div id="chat-board" class="chat-board">
+                <!-- Welcome Message -->
+                <div class="message assistant-message welcome-msg">
+                    <div class="message-content">
+                        <p>👋 Welcome to the **Serverless RAG Prototype** on AWS!</p>
+                        <p>This system utilizes Amazon Bedrock (Titan V2 embeddings + Claude 3 Haiku) to answer queries grounded in documents you upload.</p>
+                        <p>**To get started:**</p>
+                        <ol>
+                            <li>Upload files using the drag-and-drop panel on the left.</li>
+                            <li>Once the status badge changes to **indexed**, ask any questions about those files in the prompt below.</li>
+                        </ol>
+                        <p>For convenience, you can download sample datasets (Paul Graham Essays or AWS Bedrock FAQs) or upload your own files to verify the system.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Source Document Preview (Side panel drawer) -->
+            <div id="sources-drawer" class="sources-drawer" style="display: none;">
+                <div class="drawer-header">
+                    <h3>Retrieved Source Context</h3>
+                    <button id="close-drawer-btn" class="close-btn">&times;</button>
+                </div>
+                <div id="drawer-content" class="drawer-content">
+                    <!-- Dynamic sources listed here -->
+                </div>
+            </div>
+
+            <!-- Chat Prompt Input -->
+            <footer class="chat-footer">
+                <form id="chat-form" class="chat-form">
+                    <input type="text" id="query-input" placeholder="Ask a question about your knowledge base..." autocomplete="off" required>
+                    <button type="submit" id="send-btn" class="primary-btn">
+                        <span class="btn-text">Query</span>
+                        <span class="btn-icon">➔</span>
+                    </button>
+                </form>
+            </footer>
+        </main>
+    </div>
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
