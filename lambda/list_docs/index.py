@@ -1,18 +1,38 @@
 import os
 import json
 import boto3
+try:
+    from shared.dynamodb_repo import MetadataRepository
+except ModuleNotFoundError:
+    import pathlib
+    import sys
+
+    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+    from shared.dynamodb_repo import MetadataRepository
 
 s3_client = boto3.client('s3')
 
 DB_BUCKET = os.environ.get('DB_BUCKET')
 DB_KEY = os.environ.get('DB_KEY', 'index.json')
 UPLOAD_BUCKET = os.environ.get('UPLOAD_BUCKET')
+DOCUMENTS_TABLE = os.environ.get('DOCUMENTS_TABLE')
+metadata_repo = MetadataRepository(DOCUMENTS_TABLE)
+
+
+def get_http_method(event):
+    return (
+        event.get('requestContext', {})
+        .get('http', {})
+        .get('method')
+        or event.get('httpMethod')
+        or 'GET'
+    )
 
 def handler(event, context):
     print("Received document request:", json.dumps(event))
     
     # Check HTTP Method
-    method = event.get('httpMethod', 'GET')
+    method = get_http_method(event)
     
     if method == 'DELETE':
         # Get filename to delete
@@ -50,6 +70,8 @@ def handler(event, context):
             print(f"Index indexes/{filename}.json deleted from {DB_BUCKET}")
         except Exception as e:
             print(f"Error deleting index: {e}")
+
+        metadata_repo.mark_deleted(filename)
             
         return {
             "statusCode": 200,

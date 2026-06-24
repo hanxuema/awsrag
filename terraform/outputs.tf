@@ -17,3 +17,18 @@ output "storage_bucket_name" {
   value       = aws_s3_bucket.storage_bucket.id
   description = "The name of the S3 bucket storing frontend files and vector index"
 }
+
+output "documents_table_name" {
+  value       = aws_dynamodb_table.documents.name
+  description = "DynamoDB table for document metadata"
+}
+
+output "ingest_queue_name" {
+  value       = aws_sqs_queue.ingest_queue.name
+  description = "SQS queue receiving S3 upload events for ingestion"
+}
+
+output "agent_tool_function_name" {
+  value       = aws_lambda_function.agent_tool.function_name
+  description = "Lambda function compatible with Bedrock Agent action groups"
+}

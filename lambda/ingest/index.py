@@ -3,6 +3,16 @@ import json
 import urllib.parse
 import boto3
 from datetime import datetime
+try:
+    from shared.dynamodb_repo import MetadataRepository
+    from shared.graph_repo import GraphRepository
+except ModuleNotFoundError:
+    import pathlib
+    import sys
+
+    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+    from shared.dynamodb_repo import MetadataRepository
+    from shared.graph_repo import GraphRepository
 
 # Initialize clients
 s3_client = boto3.client('s3')
@@ -12,6 +22,31 @@ bedrock_client = boto3.client('bedrock-runtime')
 DB_BUCKET = os.environ.get('DB_BUCKET')
 DB_KEY = os.environ.get('DB_KEY', 'index.json')
 EMBEDDING_MODEL_ID = os.environ.get('EMBEDDING_MODEL_ID', 'amazon.titan-embed-text-v2:0')
+DOCUMENTS_TABLE = os.environ.get('DOCUMENTS_TABLE')
+JOBS_TABLE = os.environ.get('JOBS_TABLE')
+AUDIT_TABLE = os.environ.get('AUDIT_TABLE')
+metadata_repo = MetadataRepository(DOCUMENTS_TABLE, JOBS_TABLE, AUDIT_TABLE)
+graph_repo = GraphRepository()
+
+
+def extract_s3_records(event):
+    records = []
+    for record in event.get('Records', []):
+        if 's3' in record:
+            records.append(record)
+            continue
+        body = record.get('body')
+        if not body:
+            continue
+        try:
+            nested_event = json.loads(body)
+        except json.JSONDecodeError:
+            print("Skipping non-JSON SQS message body")
+            continue
+        for nested_record in nested_event.get('Records', []):
+            if 's3' in nested_record:
+                records.append(nested_record)
+    return records
 
 def get_text_from_pdf(file_path):
     try:
@@ -119,7 +154,7 @@ def handler(event, context):
     print("Received event:", json.dumps(event))
     
     # Process S3 Event
-    for record in event.get('Records', []):
+    for record in extract_s3_records(event):
         src_bucket = record['s3']['bucket']['name']
         src_key = urllib.parse.unquote_plus(record['s3']['object']['key'])
         event_name = record.get('eventName', '')
@@ -142,6 +177,7 @@ def handler(event, context):
             continue
             
         print(f"Processing file {src_key} from bucket {src_bucket}")
+        metadata_repo.mark_indexing(doc_name, src_bucket)
         
         # Download file to Lambda /tmp
         local_filename = os.path.join('/tmp', doc_name)
@@ -188,6 +224,8 @@ def handler(event, context):
         }
         
         save_doc_index(doc_name, metadata, new_chunks)
+        metadata_repo.mark_indexed(doc_name, len(text_chunks), len(extracted_text))
+        graph_repo.upsert_document_facts(doc_name, new_chunks)
         print(f"Successfully finished ingestion of {doc_name}")
         
     return {

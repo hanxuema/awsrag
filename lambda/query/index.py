@@ -1,6 +1,14 @@
 import os
 import json
 import boto3
+try:
+    from shared.graph_repo import GraphRepository
+except ModuleNotFoundError:
+    import pathlib
+    import sys
+
+    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+    from shared.graph_repo import GraphRepository
 
 # Initialize clients
 s3_client = boto3.client('s3')
@@ -11,6 +19,7 @@ DB_BUCKET = os.environ.get('DB_BUCKET')
 DB_KEY = os.environ.get('DB_KEY', 'index.json')
 EMBEDDING_MODEL_ID = os.environ.get('EMBEDDING_MODEL_ID', 'amazon.titan-embed-text-v2:0')
 LLM_MODEL_ID = os.environ.get('LLM_MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
+graph_repo = GraphRepository()
 
 # Global cache variables
 cached_db = None
@@ -135,6 +144,48 @@ def search_vectors(query_vector, db_chunks, top_k=3):
     results.sort(key=lambda x: x['similarity'], reverse=True)
     return results[:top_k]
 
+
+def vector_search(query, top_k=3):
+    query_vector = get_embedding(query)
+    db = load_db()
+    return search_vectors(query_vector, db.get('chunks', []), top_k=top_k)
+
+
+def format_graph_context(graph_result):
+    facts = (graph_result or {}).get("facts", [])
+    if not facts:
+        return ""
+    lines = []
+    for fact in facts:
+        source = fact.get("source")
+        suffix = f" (source: {source})" if source else ""
+        lines.append(f"- {fact.get('subject')} {fact.get('relationship')} {fact.get('object')}{suffix}")
+    return "\n".join(lines)
+
+
+def build_grounded_prompt(query, matched_chunks, graph_result=None):
+    context_str = ""
+    for match in matched_chunks:
+        context_str += f"\n--- DOCUMENT SOURCE: {match['doc_name']} (Similarity: {match['similarity']:.3f}) ---\n"
+        context_str += f"{match['text']}\n"
+
+    graph_context = format_graph_context(graph_result)
+    graph_section = f"\nGraph Context:\n{graph_context}\n" if graph_context else ""
+
+    return (
+        "You are an expert AI assistant that answers questions based solely on the provided context documents.\n"
+        "Your task is to answer the user's question accurately using only the information presented in the context documents and graph context.\n\n"
+        "Rules:\n"
+        "1. Answer the question using the statements, claims, and facts found in the context documents. Treat all statements in the context as absolute truth. Do not assume, extrapolate, or challenge/doubt the claims in the documents.\n"
+        "2. Only if the context documents and graph context do not contain any relevant information or statements to answer the question, state: 'I cannot find the answer in the provided context.' and do not attempt to answer using external knowledge.\n"
+        "3. Be concise and structured in your answer.\n"
+        "4. Cite the source files (e.g., 'bedrock_faq.txt') if appropriate when answering.\n\n"
+        f"Context Documents:\n{context_str}\n"
+        f"{graph_section}\n"
+        f"User Question: {query}\n\n"
+        "Answer:"
+    )
+
 def call_llm(prompt, temperature=0.3):
     try:
         print(f"Invoking LLM Model: {LLM_MODEL_ID}")
@@ -242,23 +293,8 @@ def handler(event, context):
     matched_chunks = search_vectors(query_vector, chunks, top_k=top_k)
     
     # 3. Build context prompt
-    context_str = ""
-    for idx, match in enumerate(matched_chunks):
-        context_str += f"\n--- DOCUMENT SOURCE: {match['doc_name']} (Similarity: {match['similarity']:.3f}) ---\n"
-        context_str += f"{match['text']}\n"
-        
-    system_prompt = (
-        "You are an expert AI assistant that answers questions based solely on the provided context documents.\n"
-        "Your task is to answer the user's question accurately using only the information presented in the context documents.\n\n"
-        "Rules:\n"
-        "1. Answer the question using the statements, claims, and facts found in the context documents. Treat all statements in the context as absolute truth. Do not assume, extrapolate, or challenge/doubt the claims in the documents.\n"
-        "2. Only if the context documents do not contain any relevant information or statements to answer the question, state: 'I cannot find the answer in the provided context.' and do not attempt to answer using external knowledge.\n"
-        "3. Be concise and structured in your answer.\n"
-        f"4. Cite the source files (e.g., 'bedrock_faq.txt') if appropriate when answering.\n\n"
-        f"Context Documents:\n{context_str}\n\n"
-        f"User Question: {query}\n\n"
-        "Answer:"
-    )
+    graph_result = graph_repo.search_facts(query, limit=5)
+    system_prompt = build_grounded_prompt(query, matched_chunks, graph_result)
     
     # 4. Invoke Bedrock LLM
     answer = call_llm(system_prompt, temperature=temperature)
@@ -280,6 +316,7 @@ def handler(event, context):
         },
         "body": json.dumps({
             "answer": answer,
-            "sources": sources
+            "sources": sources,
+            "graph": graph_result
         })
     }

@@ -1,8 +1,10 @@
-# AWS Serverless RAG System Prototype
+# AWS Serverless GraphRAG Platform Prototype
 
-A fully serverless, production-ready Retrieval-Augmented Generation (RAG) prototype deployed on AWS using Terraform. It features an interactive, premium chat UI, secure direct-to-S3 uploads via presigned URLs, paragraph-aware document chunking, in-memory vector search, and LLM text generation using Amazon Bedrock.
+A mostly serverless Retrieval-Augmented Generation (RAG) and GraphRAG prototype deployed on AWS using local Terraform. It aligns to a React/Python/AWS/Bedrock/knowledge-graph architecture without introducing always-on compute in the default path.
 
-**Designed for zero idle costs ($0/month)**, this system is optimized for prototype-scale applications, knowledge bases, and document QA.
+The default deployment uses S3, API Gateway, Lambda, SQS, DynamoDB, and Bedrock. Neo4j-compatible GraphRAG is optional: leave `neo4j_uri` empty for no-op graph mode, use local Neo4j/AuraDB Free for demos, or attach a paid Neo4j Aura Professional instance only when needed.
+
+**Cost posture:** near-zero idle AWS cost for prototype usage, usually around **US$0-$1/month idle**, **US$1-$5/month light demo**, and **US$5-$20/month active interview demo**, excluding optional paid Neo4j and custom domains.
 
 ---
 
@@ -27,25 +29,34 @@ graph TD
     User -->|POST /api/upload-url| APIG[API Gateway]
     APIG --> LambdaUpload[Lambda: Upload URL]
     User -->|Direct Upload| S3Uploads[S3 Uploads Bucket]
-    S3Uploads -->|S3 Event| LambdaIngest[Lambda: Ingestion Chunker]
+    S3Uploads -->|S3 Event| SQS[SQS Ingestion Queue + DLQ]
+    SQS --> LambdaIngest[Lambda: Ingestion Chunker]
     LambdaIngest --> BedrockEmbed[Bedrock Titan V2]
     LambdaIngest --> S3Storage[S3 Storage Bucket: Indexes]
+    LambdaIngest --> DDB[DynamoDB: Documents/Jobs/Audit]
+    LambdaIngest -. optional .-> Neo4j[Neo4j-compatible Graph]
     
     User -->|POST /api/chat| APIG
     APIG --> LambdaQuery[Lambda: Query Search]
     LambdaQuery --> BedrockEmbed
     LambdaQuery --> S3Storage
+    LambdaQuery -. optional graph facts .-> Neo4j
     LambdaQuery --> BedrockLLM[Bedrock Nova Micro]
+    Agent[Bedrock Agent] --> AgentTool[Lambda: Agent Tool Facade]
+    AgentTool --> LambdaQuery
 ```
 
 ### AWS Services Utilized:
 *   **Amazon S3**: Hosts static frontend assets (HTML, CSS, JS) and serves as the decentralized vector database storing `.json` files.
-*   **AWS Lambda**: Executes core operations (S3 URL generation, paragraph chunking, in-memory vector search, document listings).
+*   **AWS Lambda**: Executes core operations (S3 URL generation, paragraph chunking, in-memory vector search, document listings, and Bedrock Agent action tools).
+*   **Amazon SQS**: Decouples S3 upload events from ingestion and provides DLQ-backed retry behavior.
+*   **Amazon DynamoDB**: Stores document/job/audit metadata using on-demand billing.
 *   **Amazon API Gateway (HTTP API)**: Exposes endpoints and manages CORS configurations.
 *   **Amazon Bedrock**:
     *   `amazon.titan-embed-text-v2:0` (512-dimension unit vector embeddings).
     *   `amazon.nova-micro-v1:0` (Ultra-low latency LLM generation).
 *   **AWS Service Catalog AppRegistry**: Registers all project resources under the AWS Console's **My Applications** dashboard.
+*   **Neo4j-compatible GraphRAG**: Optional repository abstraction for AuraDB Free/local Neo4j. Empty Neo4j variables keep the graph path disabled with no runtime dependency.
 
 ---
 
@@ -59,7 +70,9 @@ graph TD
 ├── lambda/                    # Python AWS Lambda microservices
 │   ├── upload/                # Generates S3 presigned URLs for direct client uploads
 │   ├── ingest/                # S3 trigger parsing documents, paragraph-chunking, and embedding
-│   ├── query/                 # Vector embeddings generator, local ranker, and Bedrock LLM caller
+│   ├── query/                 # Vector embeddings generator, local ranker, graph context, and Bedrock LLM caller
+│   ├── agent_tool/            # Bedrock-Agent-compatible action group Lambda facade
+│   ├── shared/                # Shared response, DynamoDB, and GraphRAG repository helpers
 │   └── list_docs/             # Document indexing list directory and file deletion processing
 ├── terraform/                 # Infrastructure as Code
 │   ├── main.tf                # Storage, compute, IAM roles, API Gateway, and AppRegistry
@@ -88,8 +101,12 @@ graph TD
 
 | Mode | Usage Detail | Daily Cost |
 | :--- | :--- | :--- |
-| **Idle** | Stack fully deployed, waiting for requests. | **$0.00** |
-| **Active** | 100 uploads + 100 Q&A queries per day (50k embedding tokens + 170k LLM tokens). S3 request costs + API Gateway. | **~$0.014 / day** (approx. $0.42/month) |
+| Mode | Usage Detail | Approx Monthly Cost |
+| :--- | :--- | :--- |
+| **Idle** | Stack deployed, no requests. Small residual storage/log costs only. | **US$0-$1** |
+| **Light demo** | Occasional uploads and Q&A, small knowledge base, Nova Micro/Titan embeddings. | **US$1-$5** |
+| **Active interview demo** | Regular uploads and Q&A during demonstrations. | **US$5-$20** |
+| **Optional Neo4j paid** | AuraDB Professional instead of AuraDB Free/local Neo4j. | Adds roughly **US$65+/month** |
 
 ---
 
@@ -110,12 +127,17 @@ graph TD
     ```bash
     python3 ../scripts/package_lambdas.py
     ```
-3.  **Deploy via Terraform**:
+3.  **Review Terraform plan locally**:
     ```bash
-    TF_CLI_CONFIG_FILE=/dev/null terraform init
-    TF_CLI_CONFIG_FILE=/dev/null terraform apply -auto-approve
+    terraform plan
     ```
-4.  **Access the Portal**: Copy the S3 `website_url` output from Terraform and paste it into your browser.
+4.  **Deploy via Terraform only after explicit confirmation**:
+    ```bash
+    terraform apply
+    ```
+5.  **Access the Portal**: Copy the S3 `website_url` output from Terraform and paste it into your browser.
+
+Codex should not run `terraform apply` for this repo without explicit confirmation.
 
 ---
 
