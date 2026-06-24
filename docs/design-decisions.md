@@ -8,7 +8,7 @@ This document details the architectural choices, trade-offs, and design patterns
 
 The key driver for this architecture is **cost-efficiency for prototype and low-traffic environments**.
 
-*   **Zero Idle Cost**: Traditional vector databases and hosting setups (like Amazon OpenSearch Serverless, EC2, or ECS clusters) run constantly, incurring a minimum cost of **~$40 to $700+ per month** even when completely idle. A serverless architecture utilizing S3, API Gateway, Lambda, and Bedrock costs exactly **$0/month** when idle.
+*   **Near-Zero Idle Cost**: Traditional vector databases and hosting setups (like Amazon OpenSearch Serverless, EC2, or always-on ECS services) run constantly. This default architecture uses S3, API Gateway, Lambda, SQS, DynamoDB on-demand, and Bedrock, so compute cost scales down to zero when idle. Small storage/log charges may still appear, so the practical idle estimate is **US$0-$1/month** rather than a hard `$0`.
 *   **Automatic Scaling**: Compute scales instantly with demand. If no documents are being uploaded or queries made, zero compute runs. If thousands of requests arrive, AWS Lambda dynamically scales out instances to meet demand.
 *   **Reduced Operational Overhead**: There are no operating systems, Docker containers, Kubernetes nodes, or database clusters to patch, upgrade, or monitor.
 
@@ -38,7 +38,11 @@ By writing the index for each document to S3 (e.g. `indexes/{filename}.json`) an
 | **Vector DB** | S3 In-Memory Search | Amazon OpenSearch Serverless | **S3 In-Memory**: Extremely cheap, simple. But does not scale beyond ~10,000 document chunks due to Lambda memory limits and download latency. <br> **OpenSearch**: Scales to millions of chunks, but costs $700+/month. Chosen S3 for prototyping. |
 | **Model Inferences** | Bedrock Nova Micro | Bedrock Claude 3 Haiku | **Nova Micro**: 10x cheaper than Claude 3 Haiku, faster responses, sufficient for simple QA. <br> **Claude**: Highly intelligent, but higher cost and latency. We support both via configuration, defaulting to Nova Micro for cost control. |
 | **Chunking Strategy** | Paragraph-Aware | Fixed Character Chunks | **Paragraph-Aware**: Keeps semantic paragraphs intact, preventing dilution of specific statements. <br> **Fixed-Character**: Simpler, but cuts words in half and merges unrelated statements, reducing similarity accuracy. |
-| **Infrastructure** | Terraform | AWS CDK / CloudFormation | **Terraform**: Multi-cloud tool of choice for DevOps roles, declarative, and clear state management. |
+| **Ingestion Trigger** | S3 → SQS → Lambda | Direct S3 → Lambda | **SQS**: Adds DLQ-backed retry behavior and decouples uploads from ingestion. Direct Lambda trigger is cheaper by a tiny amount but weaker operationally. |
+| **Metadata Store** | DynamoDB on-demand | S3 metadata only | **DynamoDB**: Demonstrates NoSQL design and gives reliable document/job state without idle compute. |
+| **GraphRAG** | Optional Neo4j-compatible repository | Mandatory managed graph DB | **Optional**: Keeps default cost near zero. Local Neo4j or AuraDB Free can demonstrate graph retrieval; paid Aura is opt-in. |
+| **Containers** | Optional ECS roadmap only | Default ECS/Fargate API | **Serverless default**: ECS is useful to demonstrate container capability but conflicts with the "free when idle" goal if it runs continuously. |
+| **Infrastructure** | Local Terraform | AWS CDK / CloudFormation / GitHub Actions | **Terraform**: Multi-cloud tool of choice for DevOps roles, declarative, and clear state management. Deployments are intentionally local/manual for this repo. |
 
 ---
 
@@ -54,12 +58,13 @@ graph TD
     LambdaQuery --> VectorDB[(Pgvector / Pinecone / OpenSearch)]
     
     Upload[S3 Uploads] -->|Event| SQS[Amazon SQS Queue]
-    SQS --> ECS[ECS Fargate Workers]
-    ECS --> Bedrock[Bedrock Embeddings]
-    ECS --> VectorDB
+    SQS --> LambdaIngest[Lambda Ingest Workers]
+    LambdaIngest --> Bedrock[Bedrock Embeddings]
+    LambdaIngest --> VectorDB
+    LambdaIngest -. optional heavy jobs .-> ECS[ECS Fargate Workers]
 ```
 
 1.  **Migration to a Dedicated Vector DB**: Replace the S3 in-memory index scanner with **Amazon OpenSearch Serverless** or **RDS PostgreSQL (pgvector)** to enable indexing millions of documents with sub-10ms metadata filtering and index searching.
-2.  **Asynchronous Ingestion Queuing**: S3 upload notifications would push tasks to an **Amazon SQS** queue, processed by **AWS ECS Fargate** worker tasks. This prevents Lambda timeout limits (15 minutes) and handles heavy PDF OCR processing.
+2.  **Asynchronous Ingestion Queuing**: S3 upload notifications now push tasks to **Amazon SQS**, processed by Lambda. For very large OCR/PDF workloads, ECS Fargate workers can be added as an optional paid path.
 3.  **Caching Layer**: Implement **Amazon ElastiCache (Redis)** to cache query embeddings and frequent user queries, bypassing Bedrock API calls and database lookups to reduce response times to sub-50ms.
 4.  **API Security**: Implement **Cognito User Pools** or **API Gateway API Keys** with AWS WAF to secure endpoints and prevent resource exhaustion.

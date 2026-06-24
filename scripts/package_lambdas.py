@@ -3,7 +3,7 @@ import shutil
 import subprocess
 import zipfile
 
-def package_lambda(name, target_dir, dependency_dirs=None):
+def package_lambda(name, target_dir=None, dependency_dirs=None, extra_source_dirs=None):
     print(f"Packaging Lambda function: {name}")
     # Root paths
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,6 +22,13 @@ def package_lambda(name, target_dir, dependency_dirs=None):
 
     # Copy lambda source file
     shutil.copy2(os.path.join(lambda_src, "index.py"), os.path.join(tmp_pkg_dir, "index.py"))
+
+    for source_dir in extra_source_dirs or []:
+        src_path = os.path.join(base_dir, source_dir)
+        dst_path = os.path.join(tmp_pkg_dir, os.path.basename(source_dir))
+        if os.path.exists(dst_path):
+            shutil.rmtree(dst_path)
+        shutil.copytree(src_path, dst_path)
 
     # Install dependencies if specified
     if dependency_dirs:
@@ -52,10 +59,12 @@ def package_lambda(name, target_dir, dependency_dirs=None):
 
 def main():
     # Package each lambda function
-    package_lambda("upload", "lambda/upload")
-    package_lambda("list_docs", "lambda/list_docs")
-    package_lambda("query", "lambda/query")
-    package_lambda("ingest", "lambda/ingest", dependency_dirs=["pypdf"])
+    shared = ["lambda/shared"]
+    package_lambda("upload", extra_source_dirs=shared)
+    package_lambda("list_docs", extra_source_dirs=shared)
+    package_lambda("query", extra_source_dirs=shared)
+    package_lambda("ingest", dependency_dirs=["pypdf"], extra_source_dirs=shared)
+    package_lambda("agent_tool", extra_source_dirs=shared + ["lambda/query"])
 
 if __name__ == "__main__":
     main()

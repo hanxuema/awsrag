@@ -19,11 +19,15 @@ provider "aws" {
 # 1. Automate Lambda Packaging
 resource "null_resource" "package_lambdas" {
   triggers = {
-    upload_src    = filemd5("${path.module}/../lambda/upload/index.py")
-    query_src     = filemd5("${path.module}/../lambda/query/index.py")
-    ingest_src    = filemd5("${path.module}/../lambda/ingest/index.py")
-    list_docs_src = filemd5("${path.module}/../lambda/list_docs/index.py")
-    script_src    = filemd5("${path.module}/../scripts/package_lambdas.py")
+    upload_src          = filemd5("${path.module}/../lambda/upload/index.py")
+    query_src           = filemd5("${path.module}/../lambda/query/index.py")
+    ingest_src          = filemd5("${path.module}/../lambda/ingest/index.py")
+    list_docs_src       = filemd5("${path.module}/../lambda/list_docs/index.py")
+    agent_tool_src      = filemd5("${path.module}/../lambda/agent_tool/index.py")
+    shared_response_src = filemd5("${path.module}/../lambda/shared/response.py")
+    shared_dynamodb_src = filemd5("${path.module}/../lambda/shared/dynamodb_repo.py")
+    shared_graph_src    = filemd5("${path.module}/../lambda/shared/graph_repo.py")
+    script_src          = filemd5("${path.module}/../scripts/package_lambdas.py")
   }
 
   provisioner "local-exec" {
@@ -82,6 +86,85 @@ resource "aws_s3_bucket_website_configuration" "website" {
   }
 }
 
+# DynamoDB keeps document/job metadata out of the vector index files.
+resource "aws_dynamodb_table" "documents" {
+  name         = "${var.project_name}-documents"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "filename"
+  tags         = aws_servicecatalogappregistry_application.rag_app.application_tag
+
+  attribute {
+    name = "filename"
+    type = "S"
+  }
+}
+
+resource "aws_dynamodb_table" "jobs" {
+  name         = "${var.project_name}-jobs"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "jobId"
+  tags         = aws_servicecatalogappregistry_application.rag_app.application_tag
+
+  attribute {
+    name = "jobId"
+    type = "S"
+  }
+}
+
+resource "aws_dynamodb_table" "audit_events" {
+  name         = "${var.project_name}-audit-events"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "eventId"
+  tags         = aws_servicecatalogappregistry_application.rag_app.application_tag
+
+  attribute {
+    name = "eventId"
+    type = "S"
+  }
+}
+
+resource "aws_sqs_queue" "ingest_dlq" {
+  name                      = "${var.project_name}-ingest-dlq"
+  message_retention_seconds = 1209600
+  tags                      = aws_servicecatalogappregistry_application.rag_app.application_tag
+}
+
+resource "aws_sqs_queue" "ingest_queue" {
+  name                       = "${var.project_name}-ingest"
+  visibility_timeout_seconds = 240
+  message_retention_seconds  = 1209600
+  tags                       = aws_servicecatalogappregistry_application.rag_app.application_tag
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.ingest_dlq.arn
+    maxReceiveCount     = 3
+  })
+}
+
+resource "aws_sqs_queue_policy" "allow_s3_ingest_events" {
+  queue_url = aws_sqs_queue.ingest_queue.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowS3UploadBucketEvents"
+        Effect = "Allow"
+        Principal = {
+          Service = "s3.amazonaws.com"
+        }
+        Action   = "sqs:SendMessage"
+        Resource = aws_sqs_queue.ingest_queue.arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = aws_s3_bucket.upload_bucket.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
 # 3. IAM Execution Role for Lambdas
 resource "aws_iam_role" "lambda_role" {
   name = "${var.project_name}-lambda-role"
@@ -124,6 +207,34 @@ resource "aws_iam_policy" "lambda_policy" {
       {
         Effect = "Allow"
         Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:ChangeMessageVisibility"
+        ]
+        Resource = [
+          aws_sqs_queue.ingest_queue.arn,
+          aws_sqs_queue.ingest_dlq.arn
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = [
+          aws_dynamodb_table.documents.arn,
+          aws_dynamodb_table.jobs.arn,
+          aws_dynamodb_table.audit_events.arn
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "bedrock:InvokeModel"
         ]
         Resource = "*"
@@ -161,7 +272,10 @@ resource "aws_lambda_function" "upload_url" {
 
   environment {
     variables = {
-      UPLOAD_BUCKET = aws_s3_bucket.upload_bucket.id
+      UPLOAD_BUCKET   = aws_s3_bucket.upload_bucket.id
+      DOCUMENTS_TABLE = aws_dynamodb_table.documents.name
+      JOBS_TABLE      = aws_dynamodb_table.jobs.name
+      AUDIT_TABLE     = aws_dynamodb_table.audit_events.name
     }
   }
 }
@@ -180,9 +294,10 @@ resource "aws_lambda_function" "list_docs" {
 
   environment {
     variables = {
-      DB_BUCKET     = aws_s3_bucket.storage_bucket.id
-      DB_KEY        = "index.json"
-      UPLOAD_BUCKET = aws_s3_bucket.upload_bucket.id
+      DB_BUCKET       = aws_s3_bucket.storage_bucket.id
+      DB_KEY          = "index.json"
+      UPLOAD_BUCKET   = aws_s3_bucket.upload_bucket.id
+      DOCUMENTS_TABLE = aws_dynamodb_table.documents.name
     }
   }
 }
@@ -205,6 +320,9 @@ resource "aws_lambda_function" "query" {
       DB_KEY             = "index.json"
       EMBEDDING_MODEL_ID = var.embedding_model_id
       LLM_MODEL_ID       = var.llm_model_id
+      NEO4J_URI          = var.neo4j_uri
+      NEO4J_USERNAME     = var.neo4j_username
+      NEO4J_PASSWORD     = var.neo4j_password
     }
   }
 }
@@ -226,28 +344,57 @@ resource "aws_lambda_function" "ingest" {
       DB_BUCKET          = aws_s3_bucket.storage_bucket.id
       DB_KEY             = "index.json"
       EMBEDDING_MODEL_ID = var.embedding_model_id
+      DOCUMENTS_TABLE    = aws_dynamodb_table.documents.name
+      JOBS_TABLE         = aws_dynamodb_table.jobs.name
+      AUDIT_TABLE        = aws_dynamodb_table.audit_events.name
+      NEO4J_URI          = var.neo4j_uri
+      NEO4J_USERNAME     = var.neo4j_username
+      NEO4J_PASSWORD     = var.neo4j_password
+    }
+  }
+}
+
+resource "aws_lambda_function" "agent_tool" {
+  filename         = "${path.module}/build/agent_tool.zip"
+  source_code_hash = filebase64sha256("${path.module}/build/agent_tool.zip")
+  function_name    = "${var.project_name}-agent-tool"
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "index.handler"
+  runtime          = "python3.12"
+  timeout          = 60
+  memory_size      = 256
+  depends_on       = [null_resource.package_lambdas]
+  tags             = aws_servicecatalogappregistry_application.rag_app.application_tag
+
+  environment {
+    variables = {
+      DB_BUCKET          = aws_s3_bucket.storage_bucket.id
+      DB_KEY             = "index.json"
+      EMBEDDING_MODEL_ID = var.embedding_model_id
+      LLM_MODEL_ID       = var.llm_model_id
+      NEO4J_URI          = var.neo4j_uri
+      NEO4J_USERNAME     = var.neo4j_username
+      NEO4J_PASSWORD     = var.neo4j_password
     }
   }
 }
 
 # 5. S3 Upload Notification Event for Ingest
-resource "aws_lambda_permission" "s3_ingest_permission" {
-  statement_id  = "AllowS3InvokeIngest"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.ingest.function_name
-  principal     = "s3.amazonaws.com"
-  source_arn    = aws_s3_bucket.upload_bucket.arn
-}
-
 resource "aws_s3_bucket_notification" "upload_notification" {
   bucket = aws_s3_bucket.upload_bucket.id
 
-  lambda_function {
-    lambda_function_arn = aws_lambda_function.ingest.arn
-    events              = ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"]
+  queue {
+    queue_arn = aws_sqs_queue.ingest_queue.arn
+    events    = ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"]
   }
 
-  depends_on = [aws_lambda_permission.s3_ingest_permission]
+  depends_on = [aws_sqs_queue_policy.allow_s3_ingest_events]
+}
+
+resource "aws_lambda_event_source_mapping" "ingest_from_sqs" {
+  event_source_arn = aws_sqs_queue.ingest_queue.arn
+  function_name    = aws_lambda_function.ingest.arn
+  batch_size       = 5
 }
 
 # 6. API Gateway Configuration
@@ -292,6 +439,13 @@ resource "aws_apigatewayv2_integration" "query" {
   integration_uri    = aws_lambda_function.query.invoke_arn
 }
 
+resource "aws_apigatewayv2_integration" "agent_tool" {
+  api_id             = aws_apigatewayv2_api.http_api.id
+  integration_type   = "AWS_PROXY"
+  integration_method = "POST"
+  integration_uri    = aws_lambda_function.agent_tool.invoke_arn
+}
+
 # Routes
 resource "aws_apigatewayv2_route" "upload_url_route" {
   api_id    = aws_apigatewayv2_api.http_api.id
@@ -315,6 +469,12 @@ resource "aws_apigatewayv2_route" "query_route" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /api/chat"
   target    = "integrations/${aws_apigatewayv2_integration.query.id}"
+}
+
+resource "aws_apigatewayv2_route" "agent_tool_route" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /api/agent-tool"
+  target    = "integrations/${aws_apigatewayv2_integration.agent_tool.id}"
 }
 
 # Permissions for API Gateway to invoke lambdas
@@ -342,6 +502,21 @@ resource "aws_lambda_permission" "apigw_query" {
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }
 
+resource "aws_lambda_permission" "apigw_agent_tool" {
+  statement_id  = "AllowAPIGatewayInvokeAgentTool"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.agent_tool.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "bedrock_agent_tool" {
+  statement_id  = "AllowBedrockAgentInvokeAgentTool"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.agent_tool.function_name
+  principal     = "bedrock.amazonaws.com"
+}
+
 # 7. S3 Bucket policy to grant public read access for static website hosting
 resource "aws_s3_bucket_policy" "storage_policy" {
   bucket = aws_s3_bucket.storage_bucket.id
@@ -354,7 +529,12 @@ resource "aws_s3_bucket_policy" "storage_policy" {
         Effect    = "Allow"
         Principal = "*"
         Action    = "s3:GetObject"
-        Resource  = "${aws_s3_bucket.storage_bucket.arn}/*"
+        Resource = [
+          "${aws_s3_bucket.storage_bucket.arn}/index.html",
+          "${aws_s3_bucket.storage_bucket.arn}/style.css",
+          "${aws_s3_bucket.storage_bucket.arn}/app.js",
+          "${aws_s3_bucket.storage_bucket.arn}/config.js"
+        ]
       }
     ]
   })

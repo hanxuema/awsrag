@@ -21,3 +21,22 @@ variable "llm_model_id" {
   description = "Bedrock model ID for text generation (Amazon Nova Micro)"
   default     = "amazon.nova-micro-v1:0"
 }
+
+variable "neo4j_uri" {
+  type        = string
+  description = "Optional Neo4j-compatible bolt URI for GraphRAG. Leave empty for no-op graph mode."
+  default     = ""
+}
+
+variable "neo4j_username" {
+  type        = string
+  description = "Optional Neo4j username for GraphRAG."
+  default     = ""
+}
+
+variable "neo4j_password" {
+  type        = string
+  description = "Optional Neo4j password for GraphRAG."
+  default     = ""
+  sensitive   = true
+}
