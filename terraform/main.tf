@@ -542,35 +542,39 @@ resource "aws_s3_bucket_policy" "storage_policy" {
 
 # 8. Deploy Frontend Assets directly via S3 objects
 resource "aws_s3_object" "frontend_html" {
-  bucket       = aws_s3_bucket.storage_bucket.id
-  key          = "index.html"
-  source       = "${path.module}/../frontend/index.html"
-  content_type = "text/html"
-  etag         = filemd5("${path.module}/../frontend/index.html")
+  bucket        = aws_s3_bucket.storage_bucket.id
+  key           = "index.html"
+  source        = "${path.module}/../frontend/index.html"
+  content_type  = "text/html"
+  cache_control = "no-cache, no-store, must-revalidate"
+  etag          = filemd5("${path.module}/../frontend/index.html")
 }
 
 resource "aws_s3_object" "frontend_css" {
-  bucket       = aws_s3_bucket.storage_bucket.id
-  key          = "style.css"
-  source       = "${path.module}/../frontend/style.css"
-  content_type = "text/css"
-  etag         = filemd5("${path.module}/../frontend/style.css")
+  bucket        = aws_s3_bucket.storage_bucket.id
+  key           = "style.css"
+  source        = "${path.module}/../frontend/style.css"
+  content_type  = "text/css"
+  cache_control = "no-cache, no-store, must-revalidate"
+  etag          = filemd5("${path.module}/../frontend/style.css")
 }
 
 resource "aws_s3_object" "frontend_js" {
-  bucket       = aws_s3_bucket.storage_bucket.id
-  key          = "app.js"
-  source       = "${path.module}/../frontend/app.js"
-  content_type = "application/javascript"
-  etag         = filemd5("${path.module}/../frontend/app.js")
+  bucket        = aws_s3_bucket.storage_bucket.id
+  key           = "app.js"
+  source        = "${path.module}/../frontend/app.js"
+  content_type  = "application/javascript"
+  cache_control = "no-cache, no-store, must-revalidate"
+  etag          = filemd5("${path.module}/../frontend/app.js")
 }
 
 # Deploy dynamic config file that contains API Gateway endpoint URL
 resource "aws_s3_object" "frontend_config" {
-  bucket       = aws_s3_bucket.storage_bucket.id
-  key          = "config.js"
-  content      = "const API_BASE = '${aws_apigatewayv2_api.http_api.api_endpoint}';"
-  content_type = "application/javascript"
+  bucket        = aws_s3_bucket.storage_bucket.id
+  key           = "config.js"
+  content       = "const API_BASE = '${aws_apigatewayv2_api.http_api.api_endpoint}';"
+  content_type  = "application/javascript"
+  cache_control = "no-cache, no-store, must-revalidate"
 }
 
 # 9. AWS Service Catalog AppRegistry Application (for AWS "My Applications" Console)
