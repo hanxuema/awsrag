@@ -40,3 +40,9 @@ variable "neo4j_password" {
   default     = ""
   sensitive   = true
 }
+
+variable "neo4j_database" {
+  type        = string
+  description = "Optional Neo4j database name for GraphRAG."
+  default     = ""
+}

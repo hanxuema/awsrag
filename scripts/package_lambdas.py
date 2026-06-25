@@ -62,9 +62,9 @@ def main():
     shared = ["lambda/shared"]
     package_lambda("upload", extra_source_dirs=shared)
     package_lambda("list_docs", extra_source_dirs=shared)
-    package_lambda("query", extra_source_dirs=shared)
-    package_lambda("ingest", dependency_dirs=["pypdf"], extra_source_dirs=shared)
-    package_lambda("agent_tool", extra_source_dirs=shared + ["lambda/query"])
+    package_lambda("query", dependency_dirs=["neo4j"], extra_source_dirs=shared)
+    package_lambda("ingest", dependency_dirs=["pypdf", "neo4j"], extra_source_dirs=shared)
+    package_lambda("agent_tool", dependency_dirs=["neo4j"], extra_source_dirs=shared + ["lambda/query"])
 
 if __name__ == "__main__":
     main()

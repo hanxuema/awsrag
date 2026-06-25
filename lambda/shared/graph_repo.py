@@ -2,10 +2,11 @@ import os
 
 
 class GraphRepository:
-    def __init__(self, uri=None, username=None, password=None):
+    def __init__(self, uri=None, username=None, password=None, database=None):
         self.uri = uri or os.environ.get("NEO4J_URI")
         self.username = username or os.environ.get("NEO4J_USERNAME")
         self.password = password or os.environ.get("NEO4J_PASSWORD")
+        self.database = database or os.environ.get("NEO4J_DATABASE")
         self._driver = None
 
     def enabled(self):
@@ -26,7 +27,7 @@ class GraphRepository:
         if not driver:
             return {"written": 0}
         facts = self._extract_lightweight_facts(doc_name, chunks)
-        with driver.session() as session:
+        with self._session(driver) as session:
             for fact in facts:
                 session.run(
                     """
@@ -46,20 +47,25 @@ class GraphRepository:
         driver = self._get_driver()
         if not driver:
             return {"facts": []}
-        with driver.session() as session:
+        with self._session(driver) as session:
             rows = session.run(
                 """
                 MATCH (s:Entity)-[r:RELATED_TO]->(o:Entity)
-                WHERE toLower(s.name) CONTAINS toLower($query)
-                   OR toLower(o.name) CONTAINS toLower($query)
-                   OR toLower(r.relationship) CONTAINS toLower($query)
+                WHERE toLower(s.name) CONTAINS toLower($search_text)
+                   OR toLower(o.name) CONTAINS toLower($search_text)
+                   OR toLower(r.relationship) CONTAINS toLower($search_text)
                 RETURN s.name AS subject, r.relationship AS relationship, o.name AS object, r.source AS source
                 LIMIT $limit
                 """,
-                query=query,
+                search_text=query,
                 limit=limit,
             )
             return {"facts": [dict(row) for row in rows]}
+
+    def _session(self, driver):
+        if self.database:
+            return driver.session(database=self.database)
+        return driver.session()
 
     def _extract_lightweight_facts(self, doc_name, chunks):
         facts = []

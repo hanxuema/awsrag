@@ -3,6 +3,8 @@
 *.tfstate
 *.tfstate.backup
 .terraform.lock.hcl
+*.tfvars
+*.tfvars.json
 
 # Build and Packaging
 terraform/build/
