@@ -113,7 +113,7 @@ graph TD
 ## 🚀 Getting Started & Deployment
 
 ### Prerequisites:
-*   AWS CLI configured with credentials in `us-east-1`.
+*   AWS CLI configured with credentials. The Sydney deployment uses `ap-southeast-2`.
 *   Access enabled for **Titan Text Embeddings V2** and **Nova Micro** in AWS console (Bedrock -> Model Access).
 *   Terraform installed locally.
 *   Python 3.12+ installed locally.
@@ -129,6 +129,7 @@ graph TD
     ```
 3.  **Review Terraform plan locally**:
     ```bash
+    cd terraform
     terraform plan
     ```
 4.  **Deploy via Terraform only after explicit confirmation**:

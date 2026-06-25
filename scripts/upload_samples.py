@@ -1,8 +1,9 @@
 import os
 import boto3
 
-s3 = boto3.client('s3', region_name='us-east-1')
-bucket = 'serverless-rag-uploads-20260610110002785400000002'
+region = os.environ.get('AWS_REGION', 'ap-southeast-2')
+bucket = os.environ['UPLOAD_BUCKET']
+s3 = boto3.client('s3', region_name=region)
 
 files = [
     'sample_data/paul_graham_essay.txt',
